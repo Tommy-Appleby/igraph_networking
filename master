@@ -3,6 +3,7 @@ library(caret)
 library(igraph)
 library(readr)
 library(stringr)
+library(knitr)
 
 
 tweets <- read_csv("tweets.csv")
@@ -32,7 +33,7 @@ users.all <- users.all %>% rename(user = "c(rt.send, rt.rec)")
 
 
 tweets <- tweets %>% rename(user = user_key) #renaming user name variable
-tweets.user <- tweets %>% select(user) #selecting only the handles from the data
+tweets.user <- tweets %>% select(user) #selecting only the users from the data
 trolls <- users %>% select(screen_name)
 trolls <- trolls %>% rename(user = screen_name)
                             
@@ -45,32 +46,111 @@ trolls.u$troll <- "troll" #assigning all of these users a trolls
 nodes <- right_join(trolls.u, users.all)
 nodes <- replace(nodes, is.na(nodes), "non-troll") 
 
-# Graph distribution of Trolls and Non-Trolls in the dataset
-node.distribution <-  nodes %>% ggplot(aes(x=troll)) + geom_bar(aes(col=troll), alpha=0.5) + 
-                        theme(legend.position="none") + scale_color_manual(values=c("#119111", "#ff0505")) + 
-                        labs(title="Count of Trolls vs Non-Trolls") + 
-                        theme(plot.title=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#808484"), axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"), axis.title=element_text(colour="white"))
 
-
-#############################
-# Verify accuracy of counts #
-#############################
-plot(node.distribution)
-
+# # Graph distribution of Trolls and Non-Trolls in the dataset (not useful) 
+# node.distribution <-  nodes %>% ggplot(aes(x=troll)) + geom_bar(aes(col=troll), alpha=0.5) + 
+#                         theme(legend.position="none") + scale_color_manual(values=c("#119111", "#ff0505")) + 
+#                         labs(title="Count of Trolls vs Non-Trolls") + 
+#                         theme(plot.title=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#808484"), axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"), axis.title=element_text(colour="white"))
+# 
+# plot(node.distribution)
 
 
 #############################
 # Network graph creation    #
 #############################
 
-
+# This is an edge list, who RTs who and how many times
 rt.df <- data.frame(rt.send, rt.rec)
 ### creating the retweetnetwork based on the sender-receiver df and the node attributes (troll/non-troll)
 rt.g <- graph.data.frame(rt.df, directed=T, vertices = nodes)
 
 
-bipartite.mapping(rt.g)
-V(rt.g)$type <- bipartite_mapping(rt.g)$type
-plot(rt.g)
+# bipartite.mapping(rt.g)
+# V(rt.g)$type <- bipartite_mapping(rt.g)$type
+# plot(rt.g)
+
+### removing self-ties
+rt.g.noloop <-simplify(rt.g, remove.loops = T, remove.multiple = F)
 
 
+# Now we can compute basic centrality scores for each user and store it in a data frame.
+# removing multiple edges between users
+g <- simplify(rt.g.noloop, remove.multiple = T, remove.loops = T)
+# creating a data frame with weighted and unweighted degree centrality for each profile
+g.centrality <- data.frame(name =V(g)$name,
+                 troll= V(g)$troll,indegree=degree(g,mode='in'),
+                 indegree_weighted = degree(rt.g.noloop, mode ="in"),
+                 outdegree=degree(g,mode='out'),
+                 outdegree_weighted = degree(rt.g.noloop, mode = "out"))
+
+#ranking users by indegree, this is only showing who the trolls RT
+rank.indegree <- g.centrality %>% select(name, troll, indegree,
+                               indegree_weighted) %>% arrange(-indegree)
+
+#ranking users b weigted indegree n users * n retweets (again, according to only who trolls RT)
+rank.indegree.w <- g.centrality %>% select(name, troll, indegree,
+                                 indegree_weighted) %>% arrange(-indegree_weighted)
+
+
+### subsetting the graph by removing non-trolls
+#selecting nodes to exclude
+exclude <- V(rt.g.noloop)[troll == "non-troll"]
+#excluding the nodes
+g.troll <- delete.vertices(rt.g.noloop, exclude)
+
+### vizualizing the graph
+par(bg ="grey10")
+plot.igraph(g.troll,layout= layout.fruchterman.reingold(g.troll),
+            edge.color="grey",
+            edge.curved= .2, vertex.label = NA, vertex.frame.color="#ffffff",
+            vertex.size = 2, edge.size = 0.01, edge.arrow.size = 0.01)
+
+#decomposing the graph into components and returning the largest one
+comp <- decompose(g.troll, mode = c("weak"), max.comps = 1,
+                  min.vertices = 1)
+### plotting the graph
+par(bg ="grey10")
+plot.igraph(comp[[1]],layout= layout.fruchterman.reingold(comp[[1]]),
+            edge.color="grey",
+            edge.curved= .2, vertex.label = NA, vertex.frame.color="#ffffff",
+            vertex.size = 4, edge.size = 0.005, edge.arrow.size = 0.01)
+
+
+# 
+# Force-directed layouts try to get a nice-looking graph where edges are similar in length and cross each other as little as possible.
+# They simulate the graph as a physical system. Nodes are electrically charged particles that repulse each other when they get too close.
+# The edges act as springs that attract connected nodes closer together.
+# As a result, nodes are evenly distributed through the chart area, and the layout is intuitive in that nodes which share more connections are closer to each other.
+# The disadvantage of these algorithms is that they are rather slow and therefore less often used in graphs larger than ~1000 vertices.
+
+## https://gephi.org/users/quick-start/
+write.graph(rt.g.noloop, file="troll_network.graphml", format="graphml")
+
+
+
+
+plot(rt.g.noloop, vertex.label.cex = 0.8, vertex.label.color = "black")
+plot(g.troll, vertex.label.cex = 0.8, vertex.label.color = "black")
+
+
+#############################
+# From Lecture Notes        #
+#############################
+
+
+
+
+types <- V(rt.g.noloop)$type 
+
+deg <- degree(rt.g.noloop)
+
+bet <- betweenness(rt.g.noloop)
+
+clos <- closeness(rt.g.noloop)
+
+eig <- eigen_centrality(rt.g.noloop)$vector
+
+cent_df <- data.frame(types, deg, bet, clos, eig)
+
+cent_df[order(cent_df$type, decreasing = TRUE),]
