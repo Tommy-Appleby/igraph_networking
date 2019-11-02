@@ -11,6 +11,10 @@ users <- read_csv("users.csv")
 
 data <- tweets
 
+
+
+# RT Parsing --------------------------------------
+
 # Grep RT's 
 rt <- grep("^rt @[a-z0-9_]{1,15}", tolower(tweets$text), perl=T, value=T)
 
@@ -56,9 +60,9 @@ nodes <- replace(nodes, is.na(nodes), "non-troll")
 # plot(node.distribution)
 
 
-#############################
-# Network graph creation    #
-#############################
+# Network graph creation ###########################
+
+
 
 # This is an edge list, who RTs who and how many times
 rt.df <- data.frame(rt.send, rt.rec)
@@ -134,10 +138,7 @@ plot(rt.g.noloop, vertex.label.cex = 0.8, vertex.label.color = "black")
 plot(g.troll, vertex.label.cex = 0.8, vertex.label.color = "black")
 
 
-#############################
-# From Lecture Notes        #
-#############################
-
+# From Lecture Notes ############################
 
 
 
