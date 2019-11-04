@@ -34,6 +34,7 @@ tweets$day<-day(tweets$DayTS)
 
 users$date <- as.POSIXct(users$DayTS)
 
+# Graphing ------------------
 # Plot by Year-Month
 # https://stackoverflow.com/questions/17758006/time-series-plot-with-x-axis-in-year-month-in-r
 
@@ -87,7 +88,7 @@ pe.day <- pe %>% group_by(DayTS) %>% summarise(count=n()) %>%
 
 grid.arrange(user.creation,tweet.time, pe.month, pe.day, ncol=1)
 
-
+#####################
 # Taking the date tweet surges from above, target dats for additional analysis will be
 # 2016-03-22 "Additional Primaries" As the oldest date, how are these tweets different from later?
 # 2016-07-21 "Trump nomination" Does this mark a point of protrump interference?
@@ -169,6 +170,7 @@ return(rt.g.noloop)
 
 plotfunction(z)
 
+# Write file to Gephi
 write.graph(rt.g.noloop, file="functionoutputz.graphml", format="graphml")
 
 
