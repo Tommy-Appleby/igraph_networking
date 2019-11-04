@@ -4,74 +4,176 @@ library(igraph)
 library(readr)
 library(stringr)
 library(knitr)
+library(lubridate)
+library(gridExtra)
 
+# !diagnostics off
 
 tweets <- read_csv("tweets.csv")
 users <- read_csv("users.csv")
 
 data <- tweets
 
-# Grep RT's 
-rt <- grep("^rt @[a-z0-9_]{1,15}", tolower(tweets$text), perl=T, value=T)
 
-# Select RT senders 
-rt.send <- tolower(as.character(tweets$user_key[grep("^rt @[a-z0-9_]{1,15}", tolower(tweets$text), perl=T)]))
-rt.rec <- tolower(regmatches(rt, regexpr("@(?U).*:", rt)))
-# Remove @ and :
-rt.rec <- (gsub(":", "", rt.rec))
-rt.rec <- (gsub("@", "", rt.rec)) 
-View(rt.rec)
+# Date and Data Parsing --------------------------
 
-# Missing Values as NA
-rt.send[rt.send==""] <- "<NA>"
-rt.rec[rt.rec==""] <- "<NA>"
+users$month<-sapply(users$created_at, function(x) match(strsplit(x," ")[[1]][2], month.abb))
+users$year<-sapply(users$created_at, function(x) as.numeric(strsplit(x," ")[[1]][6]))
+users$day<-sapply(users$created_at, function(x) as.numeric(strsplit(x," ")[[1]][3]))
+users$DayTS<-as.Date(paste0(users$year,'-',users$month,'-',users$day), format="%Y-%m-%d")
+#clean from empty creation date
+#users<-data.frame(users %>% filter(created_at !=""))
 
-# Create single df with all users
-users.all <- unique(as.data.frame(c(rt.send, rt.rec))) 
-#renaming the handle names variable
-users.all <- users.all %>% rename(user = "c(rt.send, rt.rec)")
+tweets$DayTS<-as.Date(tweets$created_str,format="%Y-%m-%d")
+tweets$year<-year(tweets$DayTS)
+tweets$month<-month(tweets$DayTS)
+tweets$day<-day(tweets$DayTS)
+# tweets$weekdays<-weekdays(tweets$DayTS)
+# tweets$week<-week(tweets$DayTS)
+# tweets$weekdays <- factor(tweets$weekdays, levels = rev(c("Monday", "Tuesday", "Wednesday", "Thursday","Friday", "Saturday", "Sunday")))
 
+users$date <- as.POSIXct(users$DayTS)
 
-tweets <- tweets %>% rename(user = user_key) #renaming user name variable
-tweets.user <- tweets %>% select(user) #selecting only the users from the data
-trolls <- users %>% select(screen_name)
-trolls <- trolls %>% rename(user = screen_name)
-                            
-trolls <- rbind(trolls, tweets.user)
+# Graphing ------------------
+# Plot by Year-Month
+# https://stackoverflow.com/questions/17758006/time-series-plot-with-x-axis-in-year-month-in-r
 
-trolls.u <- unique(trolls) #removing duplicates
-trolls.u$troll <- "troll" #assigning all of these users a trolls
-### matching trolls with the complete set of handle names in the retweet network
+time <- as.POSIXct(strptime(c("2009-01-07 00:00:00","2017-09-26 23:59:59"), format = "%Y-%m-%d %H:%M:%S"))
 
-nodes <- right_join(trolls.u, users.all)
-nodes <- replace(nodes, is.na(nodes), "non-troll") 
+user.creation <- users %>% group_by(year,month) %>% summarise(count=n()) %>% mutate(dateTS = as.Date(paste0(year,'-',month,'-01'),format="%Y-%m-%d")) %>% 
+  ggplot(aes(x=as.POSIXct(dateTS),y=count)) + geom_point(size=1) + geom_line(alpha=.5,size=1, color = "#ff0505") + 
+  scale_x_datetime(limits =time) + labs(title="Users Created by Month") + xlab("Month and Year") + ylab("Number of Users Created") +
+  theme(plot.title=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#808484"), axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"), axis.title=element_text(colour="white"))
 
-
-# # Graph distribution of Trolls and Non-Trolls in the dataset (not useful) 
-# node.distribution <-  nodes %>% ggplot(aes(x=troll)) + geom_bar(aes(col=troll), alpha=0.5) + 
-#                         theme(legend.position="none") + scale_color_manual(values=c("#119111", "#ff0505")) + 
-#                         labs(title="Count of Trolls vs Non-Trolls") + 
-#                         theme(plot.title=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#808484"), axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"), axis.title=element_text(colour="white"))
-# 
-# plot(node.distribution)
+tweet.time <- tweets %>% group_by(year,month) %>% summarise(count=n()) %>% mutate(dateTS = as.Date(paste0(year,'-',month,'-01'),format="%Y-%m-%d")) %>% 
+  ggplot(aes(x=as.POSIXct(dateTS),y=count)) + geom_point(size=1) + geom_line(alpha=.5,size=1, color = "#ff0505") + 
+  scale_x_datetime(limits =time) + labs(title="Number of Tweets by Month") + xlab("Month and Year") + ylab("Number of Tweets") +
+  theme(plot.title=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#808484"), axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"), axis.title=element_text(colour="white"))
 
 
-#############################
-# Network graph creation    #
-#############################
+pe <- tweets[(tweets$DayTS> "2016-01-01" & tweets$DayTS < "2016-12-31"),]
+petime <- as.POSIXct(strptime(c("2016-01-01 00:00:00","2016-12-31 23:59:59"), format = "%Y-%m-%d %H:%M:%S"))
 
-# This is an edge list, who RTs who and how many times
-rt.df <- data.frame(rt.send, rt.rec)
-### creating the retweetnetwork based on the sender-receiver df and the node attributes (troll/non-troll)
-rt.g <- graph.data.frame(rt.df, directed=T, vertices = nodes)
+pe.month <- pe %>% group_by(year,month) %>% summarise(count=n()) %>% mutate(dateTS = as.Date(paste0(year,'-',month,'-01'),format="%Y-%m-%d")) %>% 
+  ggplot(aes(x=as.POSIXct(dateTS),y=count)) + geom_point(size=1) + geom_line(alpha=.5,size=1, color = "#ff0505") + 
+  scale_x_datetime(limits =petime) + labs(title="Tweets in 2016 by Month") + xlab("") + ylab("Number of Tweets") +
+  geom_vline(xintercept=as.numeric(as.POSIXct(as.Date('2016-11-08'))),color='blue') +
+  annotate("text", x=as.POSIXct(as.Date("2016-10-11")), y = 20000, label = "Election Day", size=3, colour="blue") +
+  theme(plot.title=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#808484"), axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"), axis.title=element_text(colour="white"))
 
 
-# bipartite.mapping(rt.g)
-# V(rt.g)$type <- bipartite_mapping(rt.g)$type
-# plot(rt.g)
+pe.day <- pe %>% group_by(DayTS) %>% summarise(count=n()) %>%
+  ggplot(aes(x=DayTS,y=count)) + geom_point(size=1) + geom_line(alpha=.5,size=1, color = "#ff0505") + 
+  labs(title="Tweets in 2016 by Day") + xlab("") + ylab("Number of Tweets") +
+  geom_vline(xintercept=as.Date('2016-11-08'),color='blue') +
+  annotate("text", x=as.Date("2016-11-08"), y = 4000, label = "Election Day", size=3, colour="blue") +
+  geom_vline(xintercept=as.Date('2016-10-19'),color='dark green') +
+  annotate("text", x=as.Date("2016-10-19"), y = 3500, label = "Access Hollywood", size=3, colour="dark green") +
+  geom_vline(xintercept=as.Date('2016-10-07'),color='black') +
+  annotate("text", x=as.Date("2016-10-07"), y = 3000, label = "Wikileaks emails \n release", size=3, colour="black") +
+  geom_vline(xintercept=as.Date('2016-09-26'),color='purple') +
+  annotate("text", x=as.Date("2016-09-26"), y = 2750, label = "First debate", size=3, colour="purple") +
+  geom_vline(xintercept=as.Date('2016-09-17'),color='orange') +
+  annotate("text", x=as.Date("2016-09-17"), y = 2625, label = "No idea", size=3, colour="orange") +
+  geom_vline(xintercept=as.Date('2016-09-11'),color='blue') +
+  annotate("text", x=as.Date("2016-09-11"), y = 2500, label = "Clinton Overheats", size=3, colour="blue") +
+  geom_vline(xintercept=as.Date('2016-07-21'),color='dark green') +
+  annotate("text", x=as.Date("2016-07-21"), y = 2000, label = "Trump Nomination", size=3, colour="dark green") +
+  geom_vline(xintercept=as.Date('2016-03-22'),color='black') +
+  annotate("text", x=as.Date("2016-03-22"), y = 1500, label = "Additional Primaries", size=3, colour="black") +
+  geom_vline(xintercept=as.Date('2016-02-02'),color='purple') +
+  annotate("text", x=as.Date("2016-02-02"), y = 1000, label = "Iowa Caucuses", size=3, colour="purple") +
+  theme(plot.title=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#808484"), axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"), axis.title=element_text(colour="white"))
 
-### removing self-ties
-rt.g.noloop <-simplify(rt.g, remove.loops = T, remove.multiple = F)
+
+grid.arrange(user.creation,tweet.time, pe.month, pe.day, ncol=1)
+
+#####################
+# Taking the date tweet surges from above, target dats for additional analysis will be
+# 2016-03-22 "Additional Primaries" As the oldest date, how are these tweets different from later?
+# 2016-07-21 "Trump nomination" Does this mark a point of protrump interference?
+# 2016-09-17 "No idea" What does this spike represent?
+# 2016-10-07 "Wikileaks emails released"
+# 2016-10-19 "Access Hollywood" What can you even say about this?
+# 2016-11-08 "Election Day" What was the final message?
+
+a <- subset(tweets, DayTS == "2016-03-22")
+b <- subset(tweets, DayTS == "2016-07-21")
+c <- subset(tweets, DayTS == "2016-09-17")
+d <- subset(tweets, DayTS == "2016-10-07")
+e <- subset(tweets, DayTS == "2016-10-19")
+f <- subset(tweets, DayTS == "2016-11-08")
+z <- tweets
+
+
+plotfunction <- function(df) {
+
+  # RT Parsing --------------------------------------
+  
+  # Grep RT's 
+  rt <- grep("^rt @[a-z0-9_]{1,15}", tolower(df$text), perl=T, value=T)
+  
+  # Select RT senders 
+  rt.send <- tolower(as.character(df$user_key[grep("^rt @[a-z0-9_]{1,15}", tolower(df$text), perl=T)]))
+  rt.rec <- tolower(regmatches(rt, regexpr("@(?U).*:", rt)))
+  # Remove @ and :
+  rt.rec <- (gsub(":", "", rt.rec))
+  rt.rec <- (gsub("@", "", rt.rec)) 
+  View(rt.rec)
+  
+  # Missing Values as NA
+  rt.send[rt.send==""] <- "<NA>"
+  rt.rec[rt.rec==""] <- "<NA>"
+  
+  # Create single df with all users
+  users.all <- unique(as.data.frame(c(rt.send, rt.rec))) 
+  #renaming the handle names variable
+  users.all <- users.all %>% rename(user = "c(rt.send, rt.rec)")
+  
+  #Force global df
+  rt.send <<- rt.send
+  rt.rec <<- rt.rec
+  
+  
+  df <- df %>% rename(user = user_key) #renaming user name variable
+  tweets.user <- df %>% select(user) #selecting only the users from the data
+  trolls <- users %>% select(screen_name)
+  trolls <- trolls %>% rename(user = screen_name)
+                              
+  trolls <- rbind(trolls, tweets.user)
+  
+  trolls.u <- unique(trolls) #removing duplicates
+  trolls.u$troll <- "troll" #assigning all of these users a trolls
+  ### matching trolls with the complete set of handle names in the retweet network
+  
+  nodes <- right_join(trolls.u, users.all)
+  nodes <<- replace(nodes, is.na(nodes), "non-troll") 
+  
+  
+  # Network graph creation ###########################
+  
+  # This is an edge list, who RTs who and how many times
+  rt.df <<- data.frame(rt.send, rt.rec)
+  ### creating the retweetnetwork based on the sender-receiver df and the node attributes (troll/non-troll)
+  rt.g <<- graph.data.frame(rt.df, directed=T, vertices = nodes)
+  
+  
+  # bipartite.mapping(rt.g)
+  # V(rt.g)$type <- bipartite_mapping(rt.g)$type
+  # plot(rt.g)
+  
+  ### removing self-ties
+  rt.g.noloop <<-simplify(rt.g, remove.loops = T, remove.multiple = F)
+
+return(rt.g.noloop)
+}
+
+plotfunction(z)
+
+# Write file to Gephi
+write.graph(rt.g.noloop, file="functionoutputz.graphml", format="graphml")
+
+
 
 
 # Now we can compute basic centrality scores for each user and store it in a data frame.
@@ -93,7 +195,40 @@ rank.indegree.w <- g.centrality %>% select(name, troll, indegree,
                                  indegree_weighted) %>% arrange(-indegree_weighted)
 
 
-### subsetting the graph by removing non-trolls
+# This was a nightmare -------------------
+# Types is returning 0, unsure why
+# types <- V(rt.g.noloop)$type
+# cent.df$types <- as.data.frame(types)
+# 
+# deg <- degree(rt.g.noloop)
+# cent.df <- as.data.frame(deg)
+# 
+# bet <- betweenness(rt.g.noloop)
+# cent.df$bet <- as.data.frame(bet)
+#
+# closeness results in error as a result of disconnected graphs?
+# clos <- closeness(rt.g.noloop)
+# 
+# eig <- eigen_centrality(rt.g.noloop)$vector
+# cent.df$eig <- as.data.frame(eig)
+#
+# Add Clos and types back once error is determined
+# cent.df <- as.data.frame(types, deg, bet, eig)
+# cent_df[order(cent_df$type, decreasing = TRUE),]
+
+
+# Still Missing Closness and Types -------------------
+cent.df <- nodes
+cent.df$deg <- degree(rt.g.noloop)
+cent.df$bet <- betweenness(rt.g.noloop)
+cent.df$eig <- eigen_centrality(rt.g.noloop)$vector
+
+
+# Island of misfit igraphs ---------------------------
+
+
+
+## subsetting the graph by removing non-trolls
 #selecting nodes to exclude
 exclude <- V(rt.g.noloop)[troll == "non-troll"]
 #excluding the nodes
@@ -102,22 +237,23 @@ g.troll <- delete.vertices(rt.g.noloop, exclude)
 ### vizualizing the graph
 par(bg ="grey10")
 plot.igraph(g.troll,layout= layout.fruchterman.reingold(g.troll),
-            edge.color="grey",
-            edge.curved= .2, vertex.label = NA, vertex.frame.color="#ffffff",
-            vertex.size = 2, edge.size = 0.01, edge.arrow.size = 0.01)
+           edge.color="grey",
+           edge.curved= .2, vertex.label = NA, vertex.frame.color="#ffffff",
+           vertex.size = 2, edge.size = 0.01, edge.arrow.size = 0.01)
 
 #decomposing the graph into components and returning the largest one
 comp <- decompose(g.troll, mode = c("weak"), max.comps = 1,
-                  min.vertices = 1)
+                 min.vertices = 1)
+
 ### plotting the graph
 par(bg ="grey10")
 plot.igraph(comp[[1]],layout= layout.fruchterman.reingold(comp[[1]]),
-            edge.color="grey",
-            edge.curved= .2, vertex.label = NA, vertex.frame.color="#ffffff",
-            vertex.size = 4, edge.size = 0.005, edge.arrow.size = 0.01)
+           edge.color="grey",
+           edge.curved= .2, vertex.label = NA, vertex.frame.color="#ffffff",
+           vertex.size = 4, edge.size = 0.005, edge.arrow.size = 0.01)
 
 
-# 
+ 
 # Force-directed layouts try to get a nice-looking graph where edges are similar in length and cross each other as little as possible.
 # They simulate the graph as a physical system. Nodes are electrically charged particles that repulse each other when they get too close.
 # The edges act as springs that attract connected nodes closer together.
@@ -125,32 +261,84 @@ plot.igraph(comp[[1]],layout= layout.fruchterman.reingold(comp[[1]]),
 # The disadvantage of these algorithms is that they are rather slow and therefore less often used in graphs larger than ~1000 vertices.
 
 ## https://gephi.org/users/quick-start/
-write.graph(rt.g.noloop, file="troll_network.graphml", format="graphml")
+
+
+#plot(rt.g.noloop, vertex.label.cex = 0.8, vertex.label.color = "black")
+#plot(g.troll, vertex.label.cex = 0.8, vertex.label.color = "black")
 
 
 
 
-plot(rt.g.noloop, vertex.label.cex = 0.8, vertex.label.color = "black")
-plot(g.troll, vertex.label.cex = 0.8, vertex.label.color = "black")
-
-
-#############################
-# From Lecture Notes        #
-#############################
 
 
 
 
-types <- V(rt.g.noloop)$type 
 
-deg <- degree(rt.g.noloop)
 
-bet <- betweenness(rt.g.noloop)
 
-clos <- closeness(rt.g.noloop)
 
-eig <- eigen_centrality(rt.g.noloop)$vector
 
-cent_df <- data.frame(types, deg, bet, clos, eig)
 
-cent_df[order(cent_df$type, decreasing = TRUE),]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
